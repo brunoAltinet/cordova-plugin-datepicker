@@ -9,6 +9,8 @@
  *
  * @author Diego Silva (https://github.com/diego-silva)
  * Added option `titleText`.
+ * @author Bruno Samardzic https://github.com/brunoAltinet
+ * Fixed the issue with nougat and spinner not showing
  */
 
 package com.plugin.datepicker;
@@ -17,6 +19,9 @@ import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.TimeZone;
 import java.util.Random;
+import java.lang.reflect.Field;
+import java.lang.reflect.Constructor;
+import android.util.AttributeSet;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
@@ -30,6 +35,7 @@ import android.app.DatePickerDialog.OnDateSetListener;
 import android.app.TimePickerDialog;
 import android.app.TimePickerDialog.OnTimeSetListener;
 import android.content.Context;
+import android.view.ContextThemeWrapper;
 import android.content.DialogInterface;
 import android.os.Build;
 import android.util.Log;
@@ -39,6 +45,104 @@ import android.widget.TimePicker;
 
 @SuppressLint("NewApi")
 public class DatePickerPlugin extends CordovaPlugin {
+	private static final class FixedHoloDatePickerDialog extends DatePickerDialog {
+
+	private static boolean IsHolo(int theme){
+		return theme==2 || theme==3;
+	}
+
+	private static Context GetContext(Context context, int theme){
+        if(theme==3) return new ContextThemeWrapper(
+										context,
+										android.R.style.Theme_Holo_Light_Dialog
+								); 
+		return context;
+	}
+
+    private FixedHoloDatePickerDialog(Context context, int theme, OnDateSetListener callBack,
+                                      int year, int monthOfYear, int dayOfMonth) {
+        super(context, theme, callBack, year, monthOfYear, dayOfMonth);
+
+        // Force spinners on Android 7.0 only (SDK 24).
+        // Note: I'm using a naked SDK value of 24 here, because I'm
+        // targeting SDK 23, and Build.VERSION_CODES.N is not available yet.
+        // But if you target SDK >= 24, you should have it.
+        if (Build.VERSION.SDK_INT == 24 && IsHolo(theme)) {
+            try {
+                final Field field = this.findField(
+                        DatePickerDialog.class,
+                        DatePicker.class,
+                        "mDatePicker"
+                );
+
+                final DatePicker datePicker = (DatePicker) field.get(this);
+                final Class<?> delegateClass = Class.forName(
+                        "android.widget.DatePicker$DatePickerDelegate"
+                );
+                final Field delegateField = this.findField(
+                        DatePicker.class,
+                        delegateClass,
+                        "mDelegate"
+                );
+
+                final Object delegate = delegateField.get(datePicker);
+                final Class<?> spinnerDelegateClass = Class.forName(
+                        "android.widget.DatePickerSpinnerDelegate"
+                );
+
+                if (delegate.getClass() != spinnerDelegateClass) {
+                    delegateField.set(datePicker, null);
+                    datePicker.removeAllViews();
+
+                    final Constructor spinnerDelegateConstructor =
+                            spinnerDelegateClass.getDeclaredConstructor(
+                                    DatePicker.class,
+                                    Context.class,
+                                    AttributeSet.class,
+                                    int.class,
+                                    int.class
+                            );
+                    spinnerDelegateConstructor.setAccessible(true);
+
+                    final Object spinnerDelegate = spinnerDelegateConstructor.newInstance(
+                            datePicker,
+                            context,
+                            null,
+                            android.R.attr.datePickerStyle,
+                            0
+                    );
+                    delegateField.set(datePicker, spinnerDelegate);
+
+                    datePicker.init(year, monthOfYear, dayOfMonth, this);
+                    datePicker.setCalendarViewShown(false);
+                    datePicker.setSpinnersShown(true);
+                }
+            } catch (Exception e) { /* Do nothing */ }
+        }
+    }
+
+    /**
+     * Find Field with expectedName in objectClass. If not found, find first occurrence of
+     * target fieldClass in objectClass.
+     */
+    private Field findField(Class objectClass, Class fieldClass, String expectedName) {
+        try {
+            final Field field = objectClass.getDeclaredField(expectedName);
+            field.setAccessible(true);
+            return field;
+        } catch (NoSuchFieldException e) { /* Ignore */ }
+
+        // Search for it if it wasn't found under the expectedName.
+        for (final Field field : objectClass.getDeclaredFields()) {
+            if (field.getType() == fieldClass) {
+                field.setAccessible(true);
+                return field;
+            }
+        }
+
+        return null;
+    }
+}
 
 	private static final String ACTION_DATE = "date";
 	private static final String ACTION_TIME = "time";
@@ -143,11 +247,12 @@ public class DatePickerPlugin extends CordovaPlugin {
 			final DatePickerPlugin datePickerPlugin,
 			final int theme, final Context currentCtx,
 			final CallbackContext callbackContext, final JsonDate jsonDate) {
+			final Context themedCtx = FixedHoloDatePickerDialog.GetContext(currentCtx,theme);
 		return new Runnable() {
 			@Override
 			public void run() {
 				final DateSetListener dateSetListener = new DateSetListener(datePickerPlugin, theme, callbackContext, jsonDate);
-				final DatePickerDialog dateDialog = new DatePickerDialog(currentCtx, theme, dateSetListener, jsonDate.year,
+				DatePickerDialog dateDialog = new FixedHoloDatePickerDialog(themedCtx, theme, dateSetListener, jsonDate.year,
 						jsonDate.month, jsonDate.day);
 				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
 					prepareDialog(dateDialog, dateSetListener, callbackContext, currentCtx, jsonDate);
