@@ -42,6 +42,7 @@ import android.util.Log;
 import android.widget.DatePicker;
 import android.widget.DatePicker.OnDateChangedListener;
 import android.widget.TimePicker;
+import android.view.View;
 
 @SuppressLint("NewApi")
 public class DatePickerPlugin extends CordovaPlugin {
@@ -146,6 +147,7 @@ public class DatePickerPlugin extends CordovaPlugin {
 
 	private static final String ACTION_DATE = "date";
 	private static final String ACTION_TIME = "time";
+	private static final String ACTION_MONTH = "month";
 	private static final String RESULT_ERROR = "error";
 	private static final String RESULT_CANCEL = "cancel";
 	private final String pluginName = "DatePickerPlugin";
@@ -283,6 +285,12 @@ public class DatePickerPlugin extends CordovaPlugin {
                 }
             });
         }
+
+		if(jsonDate.dateMode == ACTION_MONTH){
+			DatePicker datePicker = dateDialog.getDatePicker();
+			datePicker.findViewById(datePicker.getResources().getIdentifier("day","id","android")).setVisibility(View.GONE);
+		}
+		
 		String labelCancel = jsonDate.cancelText.isEmpty() ? currentCtx.getString(android.R.string.cancel) : jsonDate.cancelText; 
 		dateDialog.setButton(DialogInterface.BUTTON_NEGATIVE, labelCancel, new DialogInterface.OnClickListener() {
             @Override
@@ -445,6 +453,7 @@ public class DatePickerPlugin extends CordovaPlugin {
 		private String cancelText = "";
 		private String todayText = "";
 		private String nowText = "";
+		private String dateMode = "";
 		private long minDate = 0;
 		private long maxDate = 0;
 		private int month = 0;
@@ -471,6 +480,11 @@ public class DatePickerPlugin extends CordovaPlugin {
 				JSONObject obj = data.getJSONObject(0);
 				action = isNotEmpty(obj, "mode") ? obj.getString("mode")
 						: ACTION_DATE;
+				if(ACTION_MONTH.equalsIgnoreCase(action))
+				{
+					action = ACTION_DATE;
+					dateMode = "month";
+				}
 
 				minDate = isNotEmpty(obj, "minDate") ? obj.getLong("minDate") : 0l;
 				maxDate = isNotEmpty(obj, "maxDate") ? obj.getLong("maxDate") : 0l;
